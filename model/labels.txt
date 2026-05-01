@@ -1,0 +1,11 @@
+Background
+Car
+Pedestrian
+Bicycle
+Traffic Light
+Traffic Sign
+Road
+Sidewalk
+Building
+Vegetation
+Sky
