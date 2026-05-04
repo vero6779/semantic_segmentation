@@ -1,4 +1,6 @@
 import os
+import cv2
+import numpy as np
 from PIL import Image
 from utils.predictor import SemanticSegmentationModel
 from utils.visualization import draw_semantic_mask
@@ -23,11 +25,17 @@ def main():
         return
 
     print(f"Loading image from {demo_image_path}...")
-    image = Image.open(demo_image_path)
+    img_bgr = cv2.imread(demo_image_path)
+    image = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
     
     print("Running inference...")
     try:
-        prediction = model.predict(image)
+        image_np = np.array(image)
+        image_np = cv2.resize(image_np, (128, 128))
+        image_np = image_np.astype(np.float32) / 255.0
+        image_np = np.expand_dims(image_np, axis=0)
+
+        prediction = model.predict(image_np, original_shape=image.shape[:2])
         print("Classes detected:", prediction['classes_detected'])
         
         print("Generating visualization...")

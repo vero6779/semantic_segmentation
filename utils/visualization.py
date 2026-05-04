@@ -6,6 +6,12 @@ def draw_semantic_mask(image, prediction_dict, classes, opacity=0.5):
     """
     Overlay segmentation map, apply colors, and return the annotated image and colors.
     """
+    if image is None:
+        raise ValueError("Provided image is None.")
+        
+    if not prediction_dict or 'mask' not in prediction_dict or prediction_dict['mask'] is None:
+        raise ValueError("Invalid prediction dictionary or mask is None.")
+        
     if isinstance(image, Image.Image):
         image_np = np.array(image.convert('RGB'))
     else:

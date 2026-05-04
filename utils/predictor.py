@@ -30,38 +30,40 @@ class SemanticSegmentationModel:
             print(f"Error loading model: {e}")
             self.model = None
 
-    def preprocess(self, image):
-        if isinstance(image, Image.Image):
-            image = np.array(image.convert('RGB'))
-            
-        # Resize to typical U-Net input size (e.g., 256x256). 
-        # Using tf.image.resize handles dynamic aspect ratios safely.
-        target_size = (256, 256)
-        image_resized = tf.image.resize(image, target_size)
-        
-        # Normalize to [0, 1]
-        image_normalized = image_resized / 255.0
-        
-        # Add batch dimension
-        input_tensor = tf.expand_dims(image_normalized, 0)
-        return input_tensor, image.shape[:2]
-
-    def predict(self, image):
+    def predict(self, preprocessed_image, original_shape=None):
         if self.model is None:
             raise ValueError("Model is not loaded.")
             
-        input_tensor, original_shape = self.preprocess(image)
-        
         # Run inference
-        preds = self.model.predict(input_tensor)
+        preds = self.model.predict(preprocessed_image)
+        if preds is None or len(preds) == 0:
+            raise ValueError("Model prediction returned None or empty.")
         
         # Post-process: Get the class with the highest probability per pixel
         # Assumes output shape is (1, H, W, num_classes)
         mask = np.argmax(preds, axis=-1)[0] # Shape (H, W)
         
+        if mask is None:
+            raise ValueError("Computed mask is None.")
+        
+        # Validate original_shape
+        is_valid_shape = False
+        if original_shape is not None:
+            if isinstance(original_shape, (tuple, list)) and len(original_shape) == 2:
+                if original_shape[0] is not None and original_shape[1] is not None:
+                    try:
+                        # Ensure they are valid integers
+                        original_shape = (int(original_shape[0]), int(original_shape[1]))
+                        is_valid_shape = True
+                    except (ValueError, TypeError):
+                        pass
+        
         # Resize mask back to original image shape
-        mask_resized = tf.image.resize(mask[..., tf.newaxis], original_shape, method='nearest').numpy()
-        mask_resized = mask_resized[..., 0].astype(np.uint8)
+        if is_valid_shape:
+            mask_resized = tf.image.resize(mask[..., tf.newaxis], original_shape, method='nearest').numpy()
+            mask_resized = mask_resized[..., 0].astype(np.uint8)
+        else:
+            mask_resized = mask.astype(np.uint8)
         
         # Get detected classes
         unique_classes = np.unique(mask_resized)

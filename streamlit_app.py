@@ -2,6 +2,7 @@ import streamlit as st
 import numpy as np
 from PIL import Image
 import os
+import cv2
 from utils.predictor import SemanticSegmentationModel
 from utils.visualization import draw_semantic_mask
 from utils.mask_utils import calculate_area_percentages
@@ -32,11 +33,14 @@ use_demo = st.sidebar.checkbox("Use Demo Image", value=True)
 image = None
 if uploaded_file is not None:
     try:
-        image = Image.open(uploaded_file)
+        file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
+        img_bgr = cv2.imdecode(file_bytes, 1)
+        image = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
     except Exception as e:
         st.sidebar.error("Invalid image upload.")
 elif use_demo and os.path.exists(demo_path):
-    image = Image.open(demo_path)
+    img_bgr = cv2.imread(demo_path)
+    image = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
 else:
     st.info("Please upload an image or check 'Use Demo Image'.")
 
@@ -51,45 +55,54 @@ if image is not None:
     if st.button("Run Segmentation", type="primary", use_container_width=True):
         with st.spinner("Running deep learning inference..."):
             try:
-                prediction = model.predict(image)
-                blended_image, colors = draw_semantic_mask(image, prediction, model.classes, opacity=opacity)
+                image_np = np.array(image)
+                image_np = cv2.resize(image_np, (128, 128))
+                image_np = image_np.astype(np.float32) / 255.0
+                image_np = np.expand_dims(image_np, axis=0)
+
+                prediction = model.predict(image_np, original_shape=image.shape[:2])
                 
-                with col2:
-                    st.subheader("Segmentation Output")
-                    st.image(blended_image, use_container_width=True)
+                if prediction is None or prediction.get("mask") is None:
+                    st.error("Model prediction failed or returned an invalid mask.")
+                else:
+                    blended_image, colors = draw_semantic_mask(image, prediction, model.classes, opacity=opacity)
                     
-                st.subheader("📊 Analysis Summary")
-                stats_col1, stats_col2 = st.columns(2)
-                
-                with stats_col1:
-                    st.markdown("**Classes Detected:**")
-                    for cls in prediction['classes_detected']:
-                        st.markdown(f"- ✅ {cls}")
+                    with col2:
+                        st.subheader("Segmentation Output")
+                        st.image(blended_image, use_container_width=True)
                         
-                with stats_col2:
-                    st.markdown("**Area Distribution:**")
-                    percentages = calculate_area_percentages(prediction['mask'], model.classes)
-                    for cls, pct in percentages.items():
-                        # Exclude pure background from progress if preferred, or include it
-                        st.progress(pct / 100.0, text=f"{cls}: {pct:.1f}%")
-                        
-                st.markdown("---")
-                st.subheader("🎨 Legend")
-                # Generate clean HTML legend
-                legend_html = "<div style='display: flex; flex-wrap: wrap; gap: 15px; margin-top: 10px;'>"
-                for idx, cls in enumerate(model.classes):
-                    if cls in prediction['classes_detected']:
-                        color = colors[idx]
-                        # OpenCV uses BGR natively, but we converted it. PIL is RGB. Our colors are RGB.
-                        hex_color = '#%02x%02x%02x' % tuple(color)
-                        legend_html += f'''
-                        <div style='display: flex; align-items: center; background-color: #f0f2f6; padding: 5px 10px; border-radius: 5px;'>
-                            <div style='width: 20px; height: 20px; background-color: {hex_color}; margin-right: 10px; border-radius: 3px; border: 1px solid #ccc;'></div>
-                            <span style='font-weight: 500; color: #31333F;'>{cls}</span>
-                        </div>
-                        '''
-                legend_html += "</div>"
-                st.markdown(legend_html, unsafe_allow_html=True)
+                    st.subheader("📊 Analysis Summary")
+                    stats_col1, stats_col2 = st.columns(2)
+                    
+                    with stats_col1:
+                        st.markdown("**Classes Detected:**")
+                        for cls in prediction['classes_detected']:
+                            st.markdown(f"- ✅ {cls}")
+                            
+                    with stats_col2:
+                        st.markdown("**Area Distribution:**")
+                        percentages = calculate_area_percentages(prediction['mask'], model.classes)
+                        for cls, pct in percentages.items():
+                            # Exclude pure background from progress if preferred, or include it
+                            st.progress(pct / 100.0, text=f"{cls}: {pct:.1f}%")
+                            
+                    st.markdown("---")
+                    st.subheader("🎨 Legend")
+                    # Generate clean HTML legend
+                    legend_html = "<div style='display: flex; flex-wrap: wrap; gap: 15px; margin-top: 10px;'>"
+                    for idx, cls in enumerate(model.classes):
+                        if cls in prediction['classes_detected']:
+                            color = colors[idx]
+                            # OpenCV uses BGR natively, but we converted it. PIL is RGB. Our colors are RGB.
+                            hex_color = '#%02x%02x%02x' % tuple(color)
+                            legend_html += f'''
+                            <div style='display: flex; align-items: center; background-color: #f0f2f6; padding: 5px 10px; border-radius: 5px;'>
+                                <div style='width: 20px; height: 20px; background-color: {hex_color}; margin-right: 10px; border-radius: 3px; border: 1px solid #ccc;'></div>
+                                <span style='font-weight: 500; color: #31333F;'>{cls}</span>
+                            </div>
+                            '''
+                    legend_html += "</div>"
+                    st.markdown(legend_html, unsafe_allow_html=True)
 
             except Exception as e:
                 st.error(f"Error during segmentation: {str(e)}")
