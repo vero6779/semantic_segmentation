@@ -1,99 +1,55 @@
-import cv2
+import os
 import numpy as np
+import tensorflow as tf
 
-def get_class_colors(num_classes):
-    """
-    Generate a distinct color for each class using a random seed.
-    """
-    np.random.seed(42)
-    colors = np.random.randint(0, 255, size=(num_classes, 3), dtype=np.uint8)
+class SemanticSegmentationModel:
+    def __init__(self, model_path='model/unet_model (1).keras', labels_path='model/labels.txt'):
+        self.model_path = model_path
+        self.labels_path = labels_path
+        self.model = None
+        self.classes = []
+        self.load_labels()
+        self.load_model()
 
-    # Background = black
-    if num_classes > 0:
-        colors[0] = [0, 0, 0]
+    def load_labels(self):
+        if os.path.exists(self.labels_path):
+            with open(self.labels_path, 'r') as f:
+                self.classes = [line.strip() for line in f.readlines() if line.strip()]
+        else:
+            self.classes = ['Background', 'Foreground']
 
-    return colors
-
-
-def colorize_mask(mask, colors):
-    """
-    Convert a 2D class mask into an RGB color mask.
-    """
-    if mask is None:
-        raise ValueError("Mask is None in colorize_mask")
-
-    if not isinstance(mask, np.ndarray):
-        raise ValueError("Mask must be numpy array")
-
-    colored_mask = np.zeros((mask.shape[0], mask.shape[1], 3), dtype=np.uint8)
-
-    unique_classes = np.unique(mask)
-
-    for class_id in unique_classes:
+    def load_model(self):
         try:
-            class_id = int(class_id)
-        except:
-            continue
+            self.model = tf.keras.models.load_model(self.model_path, compile=False)
+        except Exception as e:
+            print(f"Error loading model: {e}")
 
-        if class_id < len(colors):
-            colored_mask[mask == class_id] = colors[class_id]
+    def predict(self, preprocessed_image, original_shape=None):
+        if self.model is None:
+            return None
 
-    return colored_mask
+        preds = self.model.predict(preprocessed_image)
+        
+        # معالجة مخرجات الموديل (Multi-class vs Binary)
+        if preds.shape[-1] > 1:
+            mask = np.argmax(preds, axis=-1)[0]
+        else:
+            mask = (preds[0, :, :, 0] > 0.5).astype(np.uint8)
 
+        # تغيير الحجم للحجم الأصلي بدقة
+        if original_shape:
+            mask_resized = tf.image.resize(
+                mask[..., tf.newaxis], 
+                original_shape, 
+                method='nearest'
+            ).numpy()[..., 0].astype(np.uint8)
+        else:
+            mask_resized = mask.astype(np.uint8)
 
-def blend_masks(image, colored_mask, alpha=0.5):
-    """
-    Blend the original image and the colored mask using alpha blending.
-    """
-    if image is None or colored_mask is None:
-        raise ValueError("Image or colored_mask is None in blend_masks")
+        unique_ids = np.unique(mask_resized)
+        classes_detected = [self.classes[int(i)] if int(i) < len(self.classes) else f"Class {i}" for i in unique_ids]
 
-    if not isinstance(image, np.ndarray):
-        raise ValueError("Image must be numpy array")
-
-    if not isinstance(colored_mask, np.ndarray):
-        raise ValueError("colored_mask must be numpy array")
-
-    mask_indices = np.any(colored_mask != [0, 0, 0], axis=-1)
-
-    blended = image.copy()
-
-    blended[mask_indices] = cv2.addWeighted(
-        image[mask_indices], 1 - alpha,
-        colored_mask[mask_indices], alpha, 0
-    )
-
-    return blended
-
-
-def calculate_area_percentages(mask, classes):
-    """
-    Calculate percentage of each class safely.
-    """
-    if mask is None:
-        raise ValueError("Mask is None in calculate_area_percentages")
-
-    if not isinstance(mask, np.ndarray):
-        raise ValueError("Mask must be numpy array")
-
-    if mask.size == 0:
-        raise ValueError("Mask is empty")
-
-    total_pixels = mask.size
-
-    unique, counts = np.unique(mask, return_counts=True)
-    percentages = {}
-
-    for val, count in zip(unique, counts):
-        if val is None:
-            continue
-
-        try:
-            class_index = int(val)
-        except:
-            continue
-
-        class_name = classes[class_index] if class_index < len(classes) else f"Class {class_index}"
-        percentages[class_name] = (count / total_pixels) * 100
-
-    return dict(sorted(percentages.items(), key=lambda item: item[1], reverse=True))
+        return {
+            "mask": mask_resized,
+            "classes_detected": classes_detected
+        }
