@@ -33,66 +33,65 @@ class SemanticSegmentationModel:
         if self.model is None:
             raise ValueError("Model is not loaded.")
 
-        # 🔥 تأكيد إن input صح
+        # 🔥 تأكيد input
         if not isinstance(preprocessed_image, np.ndarray):
-            raise ValueError("Input must be a numpy array")
+            raise ValueError("Input must be numpy array")
 
         if preprocessed_image.ndim != 4:
-            raise ValueError(f"Expected input shape (1, H, W, 3), got {preprocessed_image.shape}")
+            raise ValueError(f"Expected shape (1, H, W, 3), got {preprocessed_image.shape}")
 
-        # Run inference
+        # 🔥 inference
         preds = self.model.predict(preprocessed_image)
 
         if preds is None or len(preds) == 0:
-            raise ValueError("Model prediction returned None or empty.")
+            raise ValueError("Model returned empty predictions")
 
         print("Preds shape:", preds.shape)
 
-        # 🔥 التعامل مع كل أنواع الموديلات
+        # 🔥 التعامل مع كل الحالات
         if preds.ndim == 4 and preds.shape[-1] > 1:
-            # multi-class segmentation
             mask = np.argmax(preds, axis=-1)[0]
 
         elif preds.ndim == 4 and preds.shape[-1] == 1:
-            # binary segmentation (sigmoid)
             mask = (preds[0, :, :, 0] > 0.5).astype(np.uint8)
 
         elif preds.ndim == 3:
-            # shape (1, H, W)
             mask = preds[0]
 
         else:
             raise ValueError(f"Unexpected prediction shape: {preds.shape}")
 
         if mask is None:
-            raise ValueError("Mask computation failed.")
+            raise ValueError("Mask is None")
 
-        # 🔥 تأكيد original_shape
-        if (
-            original_shape is not None and
-            isinstance(original_shape, (tuple, list)) and
-            len(original_shape) == 2 and
-            original_shape[0] is not None and
-            original_shape[1] is not None
-        ):
+        # 🔥 validation قوي لـ original_shape
+        valid_shape = False
+        if original_shape is not None:
             try:
-                original_shape = (int(original_shape[0]), int(original_shape[1]))
+                h, w = original_shape
+                if h is not None and w is not None:
+                    h, w = int(h), int(w)
+                    if h > 0 and w > 0:
+                        valid_shape = True
+                        original_shape = (h, w)
+            except Exception:
+                valid_shape = False
 
+        # 🔥 resize آمن
+        if valid_shape:
+            try:
                 mask_resized = tf.image.resize(
                     mask[..., tf.newaxis],
                     original_shape,
                     method='nearest'
-                ).numpy()
-
-                mask_resized = mask_resized[..., 0].astype(np.uint8)
-
+                ).numpy()[..., 0].astype(np.uint8)
             except Exception as e:
-                print("Resize failed, using original mask:", e)
+                print("Resize failed:", e)
                 mask_resized = mask.astype(np.uint8)
         else:
             mask_resized = mask.astype(np.uint8)
 
-        # استخراج الكلاسات
+        # 🔥 استخراج الكلاسات
         unique_classes = np.unique(mask_resized)
 
         classes_detected = [
